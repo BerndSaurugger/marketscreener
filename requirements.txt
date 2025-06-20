@@ -1,0 +1,7 @@
+streamlit>=1.34.0
+pandas>=2.2.2
+yfinance>=0.2.37
+matplotlib>=3.9.0
+mplfinance>=0.12.10b0
+Pillow>=10.3.0
+tradingview-screener @ git+https://github.com/shner-elmo/TradingView-Screener.git
