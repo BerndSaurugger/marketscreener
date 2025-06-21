@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.gridspec as gridspec
 from mplfinance.original_flavor import candlestick_ohlc
-from tools.calculations import kalman_filter, heikin_ashi, calculate_macd, calculate_rsi
-from tools.loaddata import implemented_columns
+from tools.loaddata import implemented_columns, all_columns
+from tools.visualizations import visualize_stock_analysis
 
 st.set_page_config("📈 Screener", layout="wide")
 st.title("📈 Stock Screener")
@@ -55,9 +55,6 @@ MACD_CONSTRAINT = st.sidebar.checkbox(
     disabled=st.session_state.CROSS_MACD_SIGNAL,
     key="MACD_CONSTRAINT"
 )
-
-
-
 
 # Screener filters
 filters = [
@@ -108,11 +105,11 @@ with st.spinner("Running stock query..."):
         result = (
             Query()
             .select(
-                *implemented_columns()
+                *all_columns()
             )
             .where(*filters)
             .order_by('change', ascending=False)
-            .offset(5)
+            # .offset(0)
             .limit(500)
             .get_scanner_data()
         )
@@ -151,78 +148,5 @@ with st.spinner("Running stock query..."):
 
 if not df.empty:
     tickers_to_plot = st.multiselect("📉 Choose stocks to visualize", df.sort_values(by="name")["name"].tolist())
-
-    if tickers_to_plot:
-        st.subheader("📈 Advanced Visualizations")
-        data = yf.download(tickers_to_plot, interval="1d", group_by="ticker", start="2025-01-01", progress=False)
-        for ticker in tickers_to_plot:
-            # try:
-            st.markdown(f"### {ticker}")
-
-            df_ticker = data[ticker].dropna()
-
-
-            # === Analysis logic ===
-            close = df_ticker["Close"]
-            smoothed = pd.Series(kalman_filter(close), index=close.index)
-
-            df_ha = heikin_ashi(df_ticker)
-            df_ha.columns = ['Open', 'Close', 'High', 'Low', 'Volume']
-            df_ha = df_ha[['Open', 'High', 'Low', 'Close', 'Volume']]
-            macd_line, signal_line, hist = calculate_macd(close)
-            rsi = calculate_rsi(close)
-
-            # Align
-            dates = df_ha.index
-            close_aligned = close.loc[dates]
-            smoothed_aligned = smoothed.loc[dates]
-            macd_line = macd_line.loc[dates]
-            signal_line = signal_line.loc[dates]
-            hist = hist.loc[dates]
-            rsi = rsi.loc[dates]
-
-            # OHLC for plotting
-            df_ha_ohlc = df_ha.copy()
-            df_ha_ohlc['Date'] = mdates.date2num(df_ha_ohlc.index.to_pydatetime())
-            quotes = [tuple(x) for x in df_ha_ohlc[['Date', 'Open', 'High', 'Low', 'Close']].values]
-
-            # Plot
-            fig = plt.figure(figsize=(12, 10))
-            gs = gridspec.GridSpec(3, 1, height_ratios=[3, 1.2, 1], hspace=0.1)
-            ax1 = fig.add_subplot(gs[0])
-            ax2 = fig.add_subplot(gs[1], sharex=ax1)
-            ax3 = fig.add_subplot(gs[2], sharex=ax1)
-
-            for quote in quotes:
-                color = 'indianred' if quote[4] >= quote[1] else 'mediumseagreen'
-                candlestick_ohlc(ax1, [quote], width=0.6, colorup=color, colordown=color)
-
-            ax1.plot(dates, close_aligned, color='darkblue', linestyle=':', label='Price')
-            ax1.plot(dates, smoothed_aligned, color='gray', label='Kalman Smoothed')
-            ax1.set_ylabel("Price")
-            ax1.legend()
-            ax1.grid(True)
-
-            ax2.plot(dates, rsi, label='RSI', color='darkblue')
-            ax2.axhline(70, color='red', linestyle='--')
-            ax2.axhline(30, color='green', linestyle='--')
-            ax2.set_ylim(0, 100)
-            ax2.set_ylabel("RSI")
-            ax2.grid(True)
-
-            ax3.plot(dates, macd_line, label='MACD', color='purple')
-            ax3.plot(dates, signal_line, label='Signal', color='gray')
-            ax3.bar(dates, hist, color=['green' if h >= 0 else 'red' for h in hist], width=0.6, alpha=0.3)
-            ax3.set_ylabel("MACD")
-            ax3.legend()
-            ax3.grid(True)
-
-            ax3.xaxis_date()
-            ax3.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-            plt.setp(ax1.get_xticklabels(), visible=False)
-            plt.setp(ax2.get_xticklabels(), visible=False)
-            plt.xticks(rotation=45)
-
-            plt.tight_layout()
-            st.pyplot(fig)
+    visualize_stock_analysis(tickers_to_plot)
 
