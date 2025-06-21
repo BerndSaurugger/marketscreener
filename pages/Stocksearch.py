@@ -1,20 +1,65 @@
 import streamlit as st
 import pandas as pd
 from tradingview_screener import Query, col
+import yfinance as yf
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.gridspec as gridspec
+from mplfinance.original_flavor import candlestick_ohlc
+from tools.calculations import kalman_filter, heikin_ashi, calculate_macd, calculate_rsi
+from tools.loaddata import implemented_columns
 
 st.set_page_config("📈 Screener", layout="wide")
 st.title("📈 Stock Screener")
 
-# Sidebar filters
+# === VOLUME & MOMENTUM ===
+st.sidebar.subheader("📊 Volume & Momentum Filters")
 REL_VOLUME = st.sidebar.slider("Relative Volume Threshold", 0.5, 5.0, 1.2, 0.1)
 RSI_VALUE = st.sidebar.slider("RSI Threshold", 0, 100, 60)
+
+# === DRAWDOWN FILTERS ===
+st.sidebar.subheader("📉 Dip from Highs")
+ONE_MONTH_DIP = st.sidebar.slider("Price below 1M High (%)", 0, 100, 0)
+THREE_MONTH_DIP = st.sidebar.slider("Price below 3M High (%)", 0, 100, 0)
+SIX_MONTH_DIP = st.sidebar.slider("Price below 6M High (%)", 0, 100, 0)
+ATH_DIP = st.sidebar.slider("Price below All-Time High (%)", 0, 100, 0)
+ATH_DIP_STOP = st.sidebar.slider("Price not under All-Time High (%)", 0, 100, 99)
+
+# === TREND FILTERS ===
+st.sidebar.subheader("📈 EMA / Trend Filters")
 PRICE_ABOVE_EMA = st.sidebar.checkbox("Price Above EMA", value=True)
 EMA_CONSTRAINT_DAILY = st.sidebar.checkbox("EMA Constraint (Daily)", value=True)
 EMA_CONSTRAINT_HOURLY = st.sidebar.checkbox("EMA Constraint (Hourly)", value=True)
 EMA_CONSTRAINT_WEEKLY = st.sidebar.checkbox("EMA Constraint (Weekly)", value=False)
-MACD_CONSTRAINT = st.sidebar.checkbox("MACD Constraint", value=True)
 
-# Always refresh results
+# === INDICATORS ===
+st.sidebar.subheader("🔍 Indicator Filters")
+
+# Initialize session state
+if "MACD_CONSTRAINT" not in st.session_state:
+    st.session_state.MACD_CONSTRAINT = False
+if "CROSS_MACD_SIGNAL" not in st.session_state:
+    st.session_state.CROSS_MACD_SIGNAL = True
+
+# Draw checkboxes with mutual exclusion
+CROSS_MACD_SIGNAL = st.sidebar.checkbox(
+    "MACD Crosses Above Signal",
+    value=st.session_state.CROSS_MACD_SIGNAL,
+    disabled=st.session_state.MACD_CONSTRAINT,
+    key="CROSS_MACD_SIGNAL"
+)
+
+MACD_CONSTRAINT = st.sidebar.checkbox(
+    "MACD Above Signal",
+    value=st.session_state.MACD_CONSTRAINT,
+    disabled=st.session_state.CROSS_MACD_SIGNAL,
+    key="MACD_CONSTRAINT"
+)
+
+
+
+
+# Screener filters
 filters = [
     col('type') == 'stock',
     col('relative_volume_10d_calc') > REL_VOLUME,
@@ -22,8 +67,11 @@ filters = [
     col('exchange') != 'OTC',
 ]
 
-if MACD_CONSTRAINT:
+if MACD_CONSTRAINT and not CROSS_MACD_SIGNAL:
     filters += [col('MACD.macd') >= col('MACD.signal')]
+
+if CROSS_MACD_SIGNAL:
+    filters += [col('MACD.macd').crosses_above(col('MACD.signal'))]
 
 if PRICE_ABOVE_EMA:
     filters += [
@@ -54,107 +102,52 @@ if EMA_CONSTRAINT_WEEKLY:
         col('EMA50|1W') > col('EMA200|1W'),
     ]
 
-# Query results on every change
+# Query
 with st.spinner("Running stock query..."):
     try:
         result = (
             Query()
             .select(
-                'name', "close",
-                "relative_volume_10d_calc",
-                "EMA9", "EMA20", "EMA50", "EMA200",
-                "EMA9|60", "EMA20|60", "EMA50|60", "EMA200|60", 
-                "EMA9|240", "EMA20|240", "EMA50|240", "EMA200|240", 
-                "EMA9|1W", "EMA20|1W", "EMA50|1W", "EMA200|1W", 
-                "RSI7", "RSI",
-                'change|60', 'change|240', 'change', 'change|1W', 'change|1M',
-                'MACD.macd', 'MACD.signal',
-                "market_cap_basic",
-                "High.1M", "High.3M", "High.6M", "High.All",
-                "Low.1M", "Low.3M", "Low.6M", "Low.All",
-                'type', 'exchange',
-                "Volatility.D",
-                "Perf.W", "Perf.1M", "Perf.Y", "Perf.3Y", "Perf.5Y", "Perf.10Y", "Perf.YTD",
-                "sector", "price_target_average"
+                *implemented_columns()
             )
             .where(*filters)
             .order_by('change', ascending=False)
             .offset(5)
-            .limit(25)
+            .limit(500)
             .get_scanner_data()
         )
 
         if result is None or result[1] is None or len(result[1]) == 0:
             st.warning("❗ No results found. Try relaxing the filters.")
             st.stop()
-        else:
-            row_count, df = result
 
-            # Post-processing
-            df.rename(columns={"relative_volume_10d_calc": "rel_vol"}, inplace=True)
+        # Extract result
+        row_count, df = result
+        df.rename(columns={"relative_volume_10d_calc": "rel_vol"}, inplace=True)
+
+        # Post-query: apply 1M dip filter
+        df = df[(df["High.1M"] - df["close"]) / df["High.1M"] >= ONE_MONTH_DIP / 100]
+        df = df[(df["High.3M"] - df["close"]) / df["High.3M"] >= THREE_MONTH_DIP / 100]
+        df = df[(df["High.6M"] - df["close"]) / df["High.6M"] >= SIX_MONTH_DIP / 100]
+        df = df[(df["High.All"] - df["close"]) / df["High.All"] >= ATH_DIP / 100]
+        df = df[(df["High.All"] - df["close"]) / df["High.All"] <= ATH_DIP_STOP / 100]
+
+        # Compute price target distance
+        if "price_target_average" in df.columns:
             df["target up/down"] = (((df["price_target_average"] / df["close"]) - 1) * 100).round(2)
-            df = df.sort_values(by="target up/down", ascending=False)
 
-            st.success(f"Showing {len(df)} filtered results.")
-            st.dataframe(df[[
-                "name", "close", "change", "rel_vol", "Perf.W",
-                "Perf.1M", "Perf.Y", "Perf.3Y", "Perf.5Y", "Perf.10Y", "Perf.YTD",
-                "Volatility.D", "exchange", "sector", "price_target_average", "target up/down"
-            ]])
+        df = df.sort_values(by="target up/down", ascending=False)
+
+        st.success(f"Showing {len(df)} filtered results.")
+        st.dataframe(df[[
+            "name", "close","High.1M", "change", "rel_vol", "Perf.W",
+            "Perf.1M", "Perf.Y", "Perf.3Y", "Perf.5Y", "Perf.10Y", "Perf.YTD",
+            "Volatility.D", "exchange", "sector", "price_target_average", "target up/down"
+        ]])
     except Exception as e:
         st.error(f"🚨 Error running screener: {e}")
         st.stop()
 
-import yfinance as yf
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import matplotlib.gridspec as gridspec
-from mplfinance.original_flavor import candlestick_ohlc
-
-# Define charting functions
-def kalman_filter(observations, process_noise=0.001, measurement_noise=0.1):
-    estimates = []
-    estimate = observations[0]
-    error_cov = 1.0
-    for z in observations:
-        prior_estimate = estimate
-        prior_error_cov = error_cov + process_noise
-        kalman_gain = prior_error_cov / (prior_error_cov + measurement_noise)
-        estimate = prior_estimate + kalman_gain * (z - prior_estimate)
-        error_cov = (1 - kalman_gain) * prior_error_cov
-        estimates.append(estimate)
-    return estimates
-
-def heikin_ashi(df, smoothing_length=10):
-    ha = pd.DataFrame(index=df.index)
-    ha['Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
-    ha['Open'] = 0.0
-    for i in range(len(df)):
-        if i == 0:
-            ha.iat[0, ha.columns.get_loc('Open')] = df['Open'].iloc[0]
-        else:
-            ha.iat[i, ha.columns.get_loc('Open')] = (ha['Open'].iloc[i-1] + ha['Close'].iloc[i-1]) / 2
-    ha['High'] = ha[['Open', 'Close']].join(df['High']).max(axis=1)
-    ha['Low'] = ha[['Open', 'Close']].join(df['Low']).min(axis=1)
-    ha['Volume'] = df['Volume']
-    ha = ha.rolling(window=smoothing_length).mean()
-    return ha.dropna()
-
-def calculate_macd(price, fast=12, slow=26, signal=9):
-    exp1 = price.ewm(span=fast, adjust=False).mean()
-    exp2 = price.ewm(span=slow, adjust=False).mean()
-    macd_line = exp1 - exp2
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram = macd_line - signal_line
-    return macd_line, signal_line, histogram
-
-def calculate_rsi(price, period=14):
-    delta = price.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
 
 if not df.empty:
     tickers_to_plot = st.multiselect("📉 Choose stocks to visualize", df.sort_values(by="name")["name"].tolist())
@@ -233,5 +226,3 @@ if not df.empty:
             plt.tight_layout()
             st.pyplot(fig)
 
-            # except Exception as e:
-            #     st.error(f"❌ Error plotting {ticker}: {e}")
