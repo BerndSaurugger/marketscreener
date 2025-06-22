@@ -8,8 +8,6 @@ from mplfinance.original_flavor import candlestick_ohlc
 from tools.calculations import kalman_filter, heikin_ashi, calculate_macd, calculate_rsi
 from tools.loaddata import load_watchlist, save_watchlist
 
-
-
 def visualize_stock_analysis(tickers_to_plot):
     if tickers_to_plot:
         st.subheader("\U0001F4C8 Advanced Visualizations")
@@ -138,12 +136,20 @@ def visualize_stock_analysis(tickers_to_plot):
             close = df_ticker["Close"]
             smoothed = pd.Series(kalman_filter(close), index=close.index)
 
+            # === Indicators ===
             df_ha = heikin_ashi(df_ticker)
             df_ha.columns = ['Open', 'Close', 'High', 'Low', 'Volume']
             df_ha = df_ha[['Open', 'High', 'Low', 'Close', 'Volume']]
             macd_line, signal_line, hist = calculate_macd(close)
             rsi = calculate_rsi(close)
 
+            # === EMA Calculations ===
+            ema9 = close.ewm(span=9, adjust=False).mean()
+            ema20 = close.ewm(span=20, adjust=False).mean()
+            ema50 = close.ewm(span=50, adjust=False).mean()
+            ema200 = close.ewm(span=200, adjust=False).mean()
+
+            # === Align all indicators ===
             dates = df_ha.index
             close_aligned = close.loc[dates]
             smoothed_aligned = smoothed.loc[dates]
@@ -151,7 +157,40 @@ def visualize_stock_analysis(tickers_to_plot):
             signal_line = signal_line.loc[dates]
             hist = hist.loc[dates]
             rsi = rsi.loc[dates]
+            ema9 = ema9.loc[dates]
+            ema20 = ema20.loc[dates]
+            ema50 = ema50.loc[dates]
+            ema200 = ema200.loc[dates]
+            ha_open = df_ha['Open']
+            ha_close = df_ha['Close']
+            kalman_diff = smoothed_aligned.diff()
 
+            # === Signal Clusters ===
+            macd_buy = (macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1)) & (rsi < 70)
+            trend_buy = (kalman_diff > 0) & (ha_close > ha_open)
+            ema_buy = close_aligned > ema50
+
+            macd_sell = (macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1)) & (rsi > 50)
+            trend_sell = (kalman_diff < 0) & (ha_close < ha_open)
+            ema_sell = close_aligned < ema20
+
+            raw_buy_signals = macd_buy | trend_buy | ema_buy
+            raw_sell_signals = macd_sell | trend_sell | ema_sell
+
+            # === Sequential Filtering ===
+            buy_signals = pd.Series(False, index=close_aligned.index)
+            sell_signals = pd.Series(False, index=close_aligned.index)
+            in_position = False
+
+            for i in range(1, len(close_aligned)):
+                if not in_position and raw_buy_signals.iloc[i]:
+                    buy_signals.iloc[i] = True
+                    in_position = True
+                elif in_position and raw_sell_signals.iloc[i]:
+                    sell_signals.iloc[i] = True
+                    in_position = False
+
+            # === Chart Preparation ===
             df_ha_ohlc = df_ha.copy()
             df_ha_ohlc['Date'] = mdates.date2num(df_ha_ohlc.index.to_pydatetime())
             quotes = [tuple(x) for x in df_ha_ohlc[['Date', 'Open', 'High', 'Low', 'Close']].values]
@@ -166,12 +205,24 @@ def visualize_stock_analysis(tickers_to_plot):
                 color = 'indianred' if quote[4] >= quote[1] else 'mediumseagreen'
                 candlestick_ohlc(ax1, [quote], width=0.6, colorup=color, colordown=color)
 
-            ax1.plot(dates, close_aligned, color='darkblue', linestyle=':', label='Price')
-            ax1.plot(dates, smoothed_aligned, color='gray', label='Kalman Smoothed')
+            # === Price, Kalman plot ===
+            ax1.plot(dates, close_aligned, color='darkblue', linestyle=':', label='Close')
+            ax1.plot(dates, smoothed_aligned, color='gray', label='Kalman')
+
             ax1.set_ylabel("Price")
             ax1.legend()
             ax1.grid(True)
 
+            # === Signal Arrows ===
+            for i in range(1, len(dates)):
+                if buy_signals.iloc[i]:
+                    ax1.annotate('↑', (mdates.date2num(dates[i]), close_aligned.iloc[i]),
+                                 color='green', fontsize=14, ha='center', va='bottom', weight='bold')
+                elif sell_signals.iloc[i]:
+                    ax1.annotate('↓', (mdates.date2num(dates[i]), close_aligned.iloc[i]),
+                                 color='red', fontsize=14, ha='center', va='top', weight='bold')
+
+            # === RSI subplot ===
             ax2.plot(dates, rsi, label='RSI', color='darkblue')
             ax2.axhline(70, color='red', linestyle='--')
             ax2.axhline(30, color='green', linestyle='--')
@@ -179,6 +230,7 @@ def visualize_stock_analysis(tickers_to_plot):
             ax2.set_ylabel("RSI")
             ax2.grid(True)
 
+            # === MACD subplot ===
             ax3.plot(dates, macd_line, label='MACD', color='purple')
             ax3.plot(dates, signal_line, label='Signal', color='gray')
             ax3.bar(dates, hist, color=['green' if h >= 0 else 'red' for h in hist], width=0.6, alpha=0.3)
