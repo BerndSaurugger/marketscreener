@@ -6,27 +6,16 @@ import matplotlib.dates as mdates
 import matplotlib.gridspec as gridspec
 from mplfinance.original_flavor import candlestick_ohlc
 from tools.calculations import kalman_filter, heikin_ashi, calculate_macd, calculate_rsi
+from tools.loaddata import load_watchlist, save_watchlist
 
 
-def visualize_stock_analysis(
-    tickers_to_plot
-):
-    """
-    Display interactive stock analysis in Streamlit including fundamentals, price targets, and charts.
 
-    Parameters:
-    - df: DataFrame with at least a 'name' column
-    - kalman_filter_fn: function to smooth price series
-    - calculate_macd_fn: function that returns (macd, signal, histogram) from price series
-    - calculate_rsi_fn: function that returns RSI series from price series
-    - heikin_ashi_fn: function that returns HA OHLCV DataFrame
-    - start_date: date string for historical data fetch from Yahoo Finance
-    """
-
+def visualize_stock_analysis(tickers_to_plot):
     if tickers_to_plot:
-        st.subheader("📈 Advanced Visualizations")
+        st.subheader("\U0001F4C8 Advanced Visualizations")
 
         data = yf.download(tickers_to_plot, interval="1d", group_by="ticker", start="2025-01-01", progress=False)
+        watchlist = load_watchlist()
 
         for ticker in tickers_to_plot:
             try:
@@ -63,7 +52,6 @@ def visualize_stock_analysis(
                 recommendation = info.get("recommendationKey", "N/A")
                 recommendation_score = info.get("recommendationMean", "N/A")
 
-                # === Format large numbers ===
                 def fmt_large(n):
                     try:
                         n = float(n)
@@ -75,10 +63,9 @@ def visualize_stock_analysis(
                     except:
                         return n
 
-                # === Output ===
+                # === Fundamentals ===
                 st.markdown(f"""
-                #### 📌 **{ticker} — Fundamentals Overview**
-
+                #### \U0001F4CC **{ticker} — Fundamentals Overview**
                 **Sector**: {sector} • **Industry**: {industry}  
                 **Market Cap**: {fmt_large(market_cap)} • **EPS (TTM)**: {eps}  
                 **P/E**: {pe_ratio} • **P/B**: {pb_ratio}  
@@ -87,7 +74,7 @@ def visualize_stock_analysis(
                 **Dividend Yield**: {div_yield} • **Book Value**: {book_value}  
                 """)
 
-                with st.expander("💰 Show Liquidity & Cash Flow"):
+                with st.expander("\U0001F4B0 Show Liquidity & Cash Flow"):
                     st.markdown(f"""
                     **Total Cash**: {fmt_large(total_cash)}  
                     **Total Debt**: {fmt_large(total_debt)}  
@@ -98,7 +85,7 @@ def visualize_stock_analysis(
                     **Total Revenue**: {fmt_large(total_revenue)}
                     """)
 
-                with st.expander("🎯 Analyst Price Targets"):
+                with st.expander("\U0001F3AF Analyst Price Targets"):
                     if all(isinstance(val, (int, float)) for val in [target_mean, target_high, target_low] if val != "N/A"):
                         try:
                             current_price = data[ticker]["Close"].dropna().iloc[-1]
@@ -112,18 +99,42 @@ def visualize_stock_analysis(
                                 **Upside Potential**: `{upside:.2f}%` from current price `{current_price:.2f}`
                                 """)
                         except Exception as e:
-                            st.warning(f"⚠️ Could not compute upside: {e}")
+                            st.warning(f"\u26A0\uFE0F Could not compute upside: {e}")
                     else:
-                        st.info("ℹ️ No analyst price target data available.")
+                        st.info("\u2139\uFE0F No analyst price target data available.")
+
+                # === Add/Remove to/from Watchlist ===
+                col1, col2 = st.columns(2)
+                with col1:
+                    if ticker not in watchlist:
+                        if st.button(f"➕ Add {ticker} to Watchlist"):
+                            watchlist.append(ticker.upper())
+                            save_watchlist(watchlist)
+                            st.success(f"{ticker} added to watchlist.")
+                with col2:
+                    if ticker in watchlist:
+                        if f"confirm_remove_{ticker}" not in st.session_state:
+                            st.session_state[f"confirm_remove_{ticker}"] = False
+
+                        if not st.session_state[f"confirm_remove_{ticker}"]:
+                            if st.button(f"➖ Remove {ticker} from Watchlist", key=f"remove_{ticker}"):
+                                st.session_state[f"confirm_remove_{ticker}"] = True
+                        else:
+                            col_confirm1, col_confirm2 = st.columns([2, 1])
+                            with col_confirm1:
+                                st.warning(f"Click to confirm removal of {ticker}")
+                            with col_confirm2:
+                                if st.button("✅ Confirm", key=f"confirm_button_{ticker}"):
+                                    watchlist = [t for t in watchlist if t != ticker.upper()]
+                                    save_watchlist(watchlist)
+                                    st.success(f"{ticker} removed from watchlist.")
+                                    st.session_state[f"confirm_remove_{ticker}"] = False  # reset state
+
 
             except Exception as e:
-                st.warning(f"⚠️ Could not load fundamentals for {ticker}: {e}")
-
-            st.markdown(f"### {ticker}")
+                st.warning(f"\u26A0\uFE0F Could not load fundamentals for {ticker}: {e}")
 
             df_ticker = data[ticker].dropna()
-
-            # === Analysis logic ===
             close = df_ticker["Close"]
             smoothed = pd.Series(kalman_filter(close), index=close.index)
 
@@ -133,7 +144,6 @@ def visualize_stock_analysis(
             macd_line, signal_line, hist = calculate_macd(close)
             rsi = calculate_rsi(close)
 
-            # Align
             dates = df_ha.index
             close_aligned = close.loc[dates]
             smoothed_aligned = smoothed.loc[dates]
@@ -142,12 +152,10 @@ def visualize_stock_analysis(
             hist = hist.loc[dates]
             rsi = rsi.loc[dates]
 
-            # OHLC for plotting
             df_ha_ohlc = df_ha.copy()
             df_ha_ohlc['Date'] = mdates.date2num(df_ha_ohlc.index.to_pydatetime())
             quotes = [tuple(x) for x in df_ha_ohlc[['Date', 'Open', 'High', 'Low', 'Close']].values]
 
-            # Plot
             fig = plt.figure(figsize=(12, 10))
             gs = gridspec.GridSpec(3, 1, height_ratios=[3, 1.2, 1], hspace=0.1)
             ax1 = fig.add_subplot(gs[0])

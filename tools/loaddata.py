@@ -1,3 +1,7 @@
+import os
+import pandas as pd
+import streamlit as st
+WATCHLIST_FILE = "watchlist.csv"
 
 # from tradingview_screener import Query, col
 def implemented_columns():
@@ -66,3 +70,38 @@ def all_columns():
         # Other
         "number_of_employees"
     ]
+
+WATCHLIST_FILE = "watchlist.csv"
+
+def load_watchlist():
+    try:
+        return pd.read_csv(WATCHLIST_FILE)["ticker"].tolist()
+    except Exception:
+        return []
+
+def save_watchlist(tickers):
+    pd.DataFrame({"ticker": tickers}).to_csv(WATCHLIST_FILE, index=False)
+
+def add_to_watchlist(ticker):
+    tickers = load_watchlist()
+    ticker = ticker.upper()
+    if ticker and ticker not in tickers:
+        tickers.append(ticker)
+        save_watchlist(tickers)
+        st.sidebar.success(f"Added {ticker} to your watchlist!")
+    elif ticker in tickers:
+        st.sidebar.warning(f"{ticker} is already in your watchlist.")
+
+def remove_from_watchlist(ticker):
+    tickers = load_watchlist()
+    ticker = ticker.upper()
+    if ticker in tickers:
+        tickers.remove(ticker)
+        save_watchlist(tickers)
+        st.sidebar.success(f"Removed {ticker} from your watchlist.")
+    else:
+        st.sidebar.warning(f"{ticker} is not in your watchlist.")
+
+# Sidebar
+st.set_page_config("📌 Watchlist", layout="wide")
+st.title("📌 My Watchlist")
