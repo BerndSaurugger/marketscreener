@@ -70,18 +70,20 @@ if tickers:
         for ticker in selected_tickers:
             st.header(f"Analysis for {ticker}")
 
-            inference_df = get_enriched_stock_data(ticker, change=0, inference=True)
-            inference_df = inference_df.drop(columns=["Ticker", "Date"], errors='ignore')
+            # Daten nur einmal laden
+            df_inference = get_enriched_stock_data(ticker, change=0, inference=True)
+            df_long = get_enriched_stock_data(ticker, change=long_change, change_next_days=long_change_days)
+            df_short = get_enriched_stock_data(ticker, change=short_change, change_next_days=short_change_days)
 
-            long_df = get_enriched_stock_data(ticker, change=long_change, change_next_days=long_change_days)
-            short_df = get_enriched_stock_data(ticker, change=short_change, change_next_days=short_change_days)
+            # Vorbereitung Long Model
+            y_long = df_long["change"]
+            X_long = df_long.drop(columns=["change", "Ticker", "Date"], errors='ignore')
 
-            y_long = long_df["change"]
-            X_long = long_df.drop(columns=["change", "Ticker", "Date"], errors='ignore')
+            # Vorbereitung Short Model
+            y_short = df_short["change"]
+            X_short = df_short.drop(columns=["change", "Ticker", "Date"], errors='ignore')
 
-            y_short = short_df["change"]
-            X_short = short_df.drop(columns=["change", "Ticker", "Date"], errors='ignore')
-
+            # Modelltraining Long
             model = RandomForestClassifier(random_state=42)
             param_grid = {
                 "n_estimators": [50, 100],
@@ -90,25 +92,27 @@ if tickers:
                 "min_samples_leaf": [1, 2]
             }
             tscv = TimeSeriesSplit(n_splits=5)
-
             grid_long = GridSearchCV(model, param_grid, cv=tscv, scoring='precision', n_jobs=-1)
             grid_long.fit(X_long, y_long)
             best_model_long = grid_long.best_estimator_
             y_pred_long = best_model_long.predict(X_long)
             display_metrics_and_explanation(y_long, y_pred_long, "LONG")
 
+            # Modelltraining Short
             grid_short = GridSearchCV(model, param_grid, cv=tscv, scoring='precision', n_jobs=-1)
             grid_short.fit(X_short, y_short)
             best_model_short = grid_short.best_estimator_
             y_pred_short = best_model_short.predict(X_short)
             display_metrics_and_explanation(y_short, y_pred_short, "SHORT")
 
-            df_plot = get_enriched_stock_data(ticker, change=0, inference=True).reset_index()
+            # Plot-Vorbereitung
+            df_plot = df_inference.reset_index()
             if not np.issubdtype(df_plot['Date'].dtype, np.datetime64):
                 df_plot['Date'] = pd.to_datetime(df_plot['Date'])
 
-            y_pred_long_inf = best_model_long.predict(inference_df)
-            y_pred_short_inf = best_model_short.predict(inference_df)
+            inference_features = df_inference.drop(columns=["Ticker", "Date"], errors='ignore')
+            y_pred_long_inf = best_model_long.predict(inference_features)
+            y_pred_short_inf = best_model_short.predict(inference_features)
 
             dates = df_plot['Date']
             close_aligned = df_plot['Close']
@@ -134,7 +138,6 @@ if tickers:
             last_buy_date_str = dates.iloc[last_buy_idx].strftime('%Y-%m-%d') if last_buy_idx is not None else "Keine"
             last_sell_date_str = dates.iloc[last_sell_idx].strftime('%Y-%m-%d') if last_sell_idx is not None else "Keine"
 
-            # Horizontale Annotationen im Chart - nur Datum, farblich
             if last_buy_idx is not None:
                 ax.annotate(f"{last_buy_date_str}",
                             (mdates.date2num(dates[last_buy_idx]), close_aligned.iloc[last_buy_idx]),
@@ -150,7 +153,6 @@ if tickers:
             ax.set_title(f"Buy & Short Signals on Close Price for {ticker}")
             ax.set_xlabel("Date")
             ax.set_ylabel("Price")
-
             fig.autofmt_xdate(rotation=45)
 
             custom_lines = [
@@ -158,10 +160,8 @@ if tickers:
                 Line2D([0], [0], marker='^', color='green', linestyle='None', markersize=10, label=f"Letztes Buy-Datum: {last_buy_date_str}"),
                 Line2D([0], [0], marker='v', color='red', linestyle='None', markersize=10, label=f"Letztes Short-Datum: {last_sell_date_str}"),
             ]
-
             ax.legend(handles=custom_lines, loc='upper left', fontsize=9)
 
             st.pyplot(fig)
             with st.expander(f"📘 Fundamental Analysis for ({ticker})"):
                 visualize_stock_analysis(selected_tickers, without_indicators=True)
-

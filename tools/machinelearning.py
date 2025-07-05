@@ -108,10 +108,11 @@ def calculate_rsi(price, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def get_enriched_stock_data(ticker, change=0.01, inference=False, change_next_days=10):
-    df = yf.download(ticker, start="2023-01-01", end="2025-07-05", interval='1d', progress=False)
-    if df.empty:
-        raise ValueError("No data downloaded for ticker")
+def get_enriched_stock_data(ticker, change=0.01, inference=False, change_next_days=10, df=None):
+    if df is None:
+        df = yf.download(ticker, start="2023-01-01", end="2025-07-05", interval='1d', progress=False)
+        if df.empty:
+            raise ValueError("No data downloaded for ticker")
 
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = ['_'.join(col).strip() for col in df.columns.values]
@@ -154,7 +155,6 @@ def get_enriched_stock_data(ticker, change=0.01, inference=False, change_next_da
 
     df = df.dropna().reset_index(drop=True)
 
-    # Hier rufe ich Generate_features auf, um zusätzliche Features einzubauen
     df = df.set_index('Date') if 'Date' in df.columns else df.set_index(df.columns[0])
     df = Generate_features(df, change=change, inference=inference, change_next_days=change_next_days)
 
