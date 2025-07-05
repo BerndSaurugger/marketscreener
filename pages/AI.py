@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.lines import Line2D
 import numpy as np
+import yfinance as yf  
 
 with st.sidebar:
     st.subheader("➕ Add to Watchlist")
@@ -25,15 +26,26 @@ with st.sidebar:
         remove_from_watchlist(ticker_to_remove)
 
     st.subheader("⚙️ Hyperparameters")
-    long_change_perc = st.slider("Long Model Change Threshold (%)", 0, 200, 50, 1)
+    schalter = st.toggle('Choose Watchist or Recommendations')
+
+    if schalter:
+        st.write('Use Watchist.')
+        tickers = sorted(load_watchlist())
+    else:
+        st.write('Use Recommentdations.')
+        tickers = pd.read_csv("2025-07-05T18-36_export.csv")['Ticker'].tolist()
+
+    long_change_perc = st.slider("Long Model Change Threshold (%)", 0, 200, 60, 1)
     long_change = long_change_perc / 100.0
-    long_change_days = st.slider("Days for Long Model Change", 1, 60, 10, 1)
+    long_change_days = st.slider("Days for Long Model Change", 1, 60, 20, 1)
 
-    short_change_perc_positive = st.slider("Short Model Change Threshold (%) (higher slider → more negative)", 0, 99, 20, 1)
+    short_change_perc_positive = st.slider("Short Model Change Threshold (%) (higher slider → more negative)", 0, 99, 15, 1)
     short_change = -short_change_perc_positive / 100.0
-    short_change_days = st.slider("Days for Short Model Change", 1, 60, 10, 1)
+    short_change_days = st.slider("Days for Short Model Change", 1, 60, 20, 1)
 
-tickers = sorted(load_watchlist())
+
+
+
 
 def display_metrics_and_explanation(y_true, y_pred, label):
     acc = accuracy_score(y_true, y_pred)
@@ -42,7 +54,6 @@ def display_metrics_and_explanation(y_true, y_pred, label):
     cm = confusion_matrix(y_true, y_pred)
 
     labels_present = np.unique(np.concatenate((y_true, y_pred)))
-    label_names = [f"Class {i}" for i in labels_present]
     cm_df = pd.DataFrame(cm, index=[f"Actual {i}" for i in labels_present],
                             columns=[f"Predicted {i}" for i in labels_present])
 
@@ -65,25 +76,35 @@ def display_metrics_and_explanation(y_true, y_pred, label):
         st.write(cm_df)
 
 if tickers:
-    selected_tickers = st.multiselect("Select stocks from your watchlist to analyze", options=tickers)
+    select_all = st.checkbox("Select all tickers")
+    
+    if select_all:
+        selected_tickers = st.multiselect(
+            "Select stocks to analyze (watchlist only)", 
+            options=tickers,
+            default=tickers
+        )
+    else:
+        selected_tickers = st.multiselect(
+            "Select stocks to analyze (watchlist only)", 
+            options=tickers
+        )
+    
     if selected_tickers:
         for ticker in selected_tickers:
             st.header(f"Analysis for {ticker}")
+            df = yf.download(ticker, start="2023-01-01", end="2025-07-05", interval='1d', progress=False)
 
-            # Daten nur einmal laden
-            df_inference = get_enriched_stock_data(ticker, change=0, inference=True)
-            df_long = get_enriched_stock_data(ticker, change=long_change, change_next_days=long_change_days)
-            df_short = get_enriched_stock_data(ticker, change=short_change, change_next_days=short_change_days)
+            df_inference = get_enriched_stock_data(ticker, change=0, inference=True, df=df)
+            df_long = get_enriched_stock_data(ticker, change=long_change, change_next_days=long_change_days, df=df)
+            df_short = get_enriched_stock_data(ticker, change=short_change, change_next_days=short_change_days, df=df)
 
-            # Vorbereitung Long Model
             y_long = df_long["change"]
             X_long = df_long.drop(columns=["change", "Ticker", "Date"], errors='ignore')
 
-            # Vorbereitung Short Model
             y_short = df_short["change"]
             X_short = df_short.drop(columns=["change", "Ticker", "Date"], errors='ignore')
 
-            # Modelltraining Long
             model = RandomForestClassifier(random_state=42)
             param_grid = {
                 "n_estimators": [50, 100],
@@ -98,14 +119,12 @@ if tickers:
             y_pred_long = best_model_long.predict(X_long)
             display_metrics_and_explanation(y_long, y_pred_long, "LONG")
 
-            # Modelltraining Short
             grid_short = GridSearchCV(model, param_grid, cv=tscv, scoring='precision', n_jobs=-1)
             grid_short.fit(X_short, y_short)
             best_model_short = grid_short.best_estimator_
             y_pred_short = best_model_short.predict(X_short)
             display_metrics_and_explanation(y_short, y_pred_short, "SHORT")
 
-            # Plot-Vorbereitung
             df_plot = df_inference.reset_index()
             if not np.issubdtype(df_plot['Date'].dtype, np.datetime64):
                 df_plot['Date'] = pd.to_datetime(df_plot['Date'])
@@ -164,4 +183,6 @@ if tickers:
 
             st.pyplot(fig)
             with st.expander(f"📘 Fundamental Analysis for ({ticker})"):
-                visualize_stock_analysis(selected_tickers, without_indicators=True)
+                visualize_stock_analysis([ticker], without_indicators=True)
+else:
+    st.write("Watchlist ist leer.")
