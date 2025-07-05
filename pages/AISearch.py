@@ -20,6 +20,15 @@ with st.sidebar:
         remove_from_watchlist(ticker_to_remove)
 
     st.subheader("⚙️ Hyperparameters")
+
+    schalter = st.toggle('Choose Watchist or Recommendations')
+
+    if schalter:
+        st.write('Use Watchist.')
+        tickers = sorted(load_watchlist())
+    else:
+        st.write('Use Recommentdations.')
+        tickers = pd.read_csv("nasdaq.csv")['Symbol'].tolist()
     long_change_perc = st.slider("Long Model Change Threshold (%)", 0, 200, 60, 1)
     long_change = long_change_perc / 100.0
     long_change_days = st.slider("Days for Long Model Change", 1, 60, 20, 1)
@@ -28,8 +37,6 @@ with st.sidebar:
     short_change = -short_change_perc_positive / 100.0
     short_change_days = st.slider("Days for Short Model Change", 1, 60, 20, 1)
 
-tickers = sorted(load_watchlist())
-tickers = pd.read_csv("nasdaq.csv")['Symbol'].tolist()
 st.title("📈 Signal Finder")
 
 if st.button("🔁 Train all Models"):
