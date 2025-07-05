@@ -8,7 +8,7 @@ from mplfinance.original_flavor import candlestick_ohlc
 from tools.calculations import kalman_filter, heikin_ashi, calculate_macd, calculate_rsi
 from tools.loaddata import load_watchlist, save_watchlist
 
-def visualize_stock_analysis(tickers_to_plot):
+def visualize_stock_analysis(tickers_to_plot, without_indicators=False):
     if tickers_to_plot:
         st.subheader("\U0001F4C8 Advanced Visualizations")
 
@@ -214,13 +214,14 @@ def visualize_stock_analysis(tickers_to_plot):
             ax1.grid(True)
 
             # === Signal Arrows ===
-            for i in range(1, len(dates)):
-                if buy_signals.iloc[i]:
-                    ax1.annotate('↑', (mdates.date2num(dates[i]), close_aligned.iloc[i]),
-                                 color='green', fontsize=14, ha='center', va='bottom', weight='bold')
-                elif sell_signals.iloc[i]:
-                    ax1.annotate('↓', (mdates.date2num(dates[i]), close_aligned.iloc[i]),
-                                 color='red', fontsize=14, ha='center', va='top', weight='bold')
+            if without_indicators == False:
+                for i in range(1, len(dates)):
+                    if buy_signals.iloc[i]:
+                        ax1.annotate('↑', (mdates.date2num(dates[i]), close_aligned.iloc[i]),
+                                    color='green', fontsize=14, ha='center', va='bottom', weight='bold')
+                    elif sell_signals.iloc[i]:
+                        ax1.annotate('↓', (mdates.date2num(dates[i]), close_aligned.iloc[i]),
+                                    color='red', fontsize=14, ha='center', va='top', weight='bold')
 
             # === RSI subplot ===
             ax2.plot(dates, rsi, label='RSI', color='darkblue')

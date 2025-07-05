@@ -71,8 +71,6 @@ def all_columns():
         "number_of_employees"
     ]
 
-WATCHLIST_FILE = "watchlist.csv"
-
 def load_watchlist():
     try:
         return pd.read_csv(WATCHLIST_FILE)["ticker"].tolist()
@@ -102,6 +100,3 @@ def remove_from_watchlist(ticker):
     else:
         st.sidebar.warning(f"{ticker} is not in your watchlist.")
 
-# Sidebar
-st.set_page_config("📌 Watchlist", layout="wide")
-st.title("📌 My Watchlist")
