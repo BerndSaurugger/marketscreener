@@ -93,7 +93,7 @@ if tickers:
     if selected_tickers:
         for ticker in selected_tickers:
             st.header(f"Analysis for {ticker}")
-            df = yf.download(ticker, start="2023-01-01", end="2025-07-05", interval='1d', progress=False)
+            df = yf.download(ticker, start="2000-01-01", interval='1d', progress=False)
 
             df_inference = get_enriched_stock_data(ticker, change=0, inference=True, df=df)
             df_long = get_enriched_stock_data(ticker, change=long_change, change_next_days=long_change_days, df=df)
