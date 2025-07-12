@@ -110,7 +110,7 @@ def calculate_rsi(price, period=14):
 
 def get_enriched_stock_data(ticker, change=0.01, inference=False, change_next_days=10, df=None):
     if df is None:
-        df = yf.download(ticker, start="2023-01-01", end="2025-07-05", interval='1d', progress=False)
+        df = yf.download(ticker, start="2023-01-01", interval='1d', progress=False)
         if df.empty:
             raise ValueError("No data downloaded for ticker")
 
