@@ -32,6 +32,7 @@ with st.sidebar:
     else:
         st.write('Use Recommendations.')
         tickers = pd.read_csv("2025-07-05T18-36_export.csv")["Ticker"].tolist()
+    days = st.slider("Days for Model Prediction", 1, 100, 20, 1)
 
 # Main area
 if tickers:
@@ -52,13 +53,17 @@ if tickers:
             X_inf = df_features_full.drop(columns=["Ticker", "Date", "Close"], errors='ignore')
 
             df_features = df_features_full.copy()
-            df_features['target'] = df_features['Close'].shift(-20)
+            df_features['target'] = df_features['Close'].shift(-days)
+            # df_features['target'] = (df_features['Close'].shift(-days) - df_features['Close']) / df_features['Close']
+
             df_features = df_features.dropna()
             y = df_features['target']
             X = df_features.drop(columns=["Ticker", "Date", "Close", "target"], errors='ignore')
 
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
+            split_index = int(len(X) * 0.80)
+            X_train, X_test = X.iloc[:split_index], X.iloc[split_index:]
+            y_train, y_test = y.iloc[:split_index], y.iloc[split_index:]
             param_dist = {
                 'n_estimators': [50, 100, 200],
                 'max_depth': [3, 5, 7, 10, None],
@@ -94,7 +99,7 @@ if tickers:
           # Letzte 20 Inputs
             # Letzte 20 Zeilen aus X_inf
             # Vorhersage für die letzten 20 Tage in die Zukunft
-            X_last_20 = X_inf[-20:]
+            X_last_20 = X_inf[-days:]
             y_pred_last_20 = best_model.predict(X_last_20)
             y_pred_last_20 = np.array(y_pred_last_20).flatten()
 
@@ -108,20 +113,20 @@ if tickers:
             # Tatsächliche Close-Werte der letzten 200 Tage (blau)
             recent_close = df['Close'].iloc[-200:]
             recent_dates = df.index[-200:]
-            recent_close_180 = recent_close[20:]
-            recent_dates_180 = recent_dates[20:]
+            recent_close_180 = recent_close[days:]
+            recent_dates_180 = recent_dates[days:]
             ax.plot(recent_dates_180, recent_close_180, label="Letzte 180 Tage Close-Werte (ohne erste 20)", color='blue', linewidth=2)
 
             # Verschobene Vorhersage (orange), +20 Börsentage
-            shift_days = 20
-            recent_dates_180 = recent_dates[:180]                  # take first 180 dates
+            shift_days = days
+            recent_dates_180 = recent_dates[:200-days]                  # take first 180 dates
             dates_shifted = recent_dates_180 + pd.offsets.BDay(shift_days)
-            y_pred_recent_180 = y_pred_full[-200:-20]
+            y_pred_recent_180 = y_pred_full[-200:-days]
             ax.plot(dates_shifted, y_pred_recent_180, label="Vorhersage (vergangen, +20 BDay)", color='orange', linestyle='--', linewidth=2)
 
             # Zukunftsvorhersagen (rot)
             start_date = df.index[-2]
-            future_dates = pd.bdate_range(start=start_date + pd.offsets.BDay(1), periods=20)
+            future_dates = pd.bdate_range(start=start_date + pd.offsets.BDay(1), periods=days)
             ax.plot(future_dates, y_pred_last_20, label="Vorhergesagte Close-Werte (Zukunft)", color='red', linestyle='--', linewidth=2)
 
             # Min/Max der Zukunftsvorhersage annotieren
